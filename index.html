@@ -286,16 +286,30 @@ async function loadAll() {
     state.kids = [kidRow];
     state.activeKidId = kidRow.id;
   } else {
+    // admin (co-parent) check: linked via ck_admins.login_email
+    let adminRow = null;
+    const { data: adminRows, error: aErr } = await sb.from('ck_admins').select('*');
+    if (!aErr && adminRows) {
+      adminRow = adminRows.find(a =>
+        a.user_id !== uid && (a.login_email || '').toLowerCase() === myEmail);
+    }
+
     state.role = 'parent';
-    state.familyId = uid;
-    kids = kids.filter(k => k.user_id === uid);
-    if (kids.length === 0) {
-      const seed = KID_DEFAULTS.map(k => Object.assign({ user_id: uid }, k));
-      const { data: seeded, error: sErr } = await sb.from('ck_kids').insert(seed).select();
-      if (sErr) { alert('Seed error: ' + sErr.message); return; }
-      kids = seeded.sort((a, b) => a.sort - b.sort);
+    if (adminRow) {
+      state.familyId = adminRow.user_id;
+      kids = kids.filter(k => k.user_id === state.familyId);
+    } else {
+      state.familyId = uid;
+      kids = kids.filter(k => k.user_id === uid);
+      if (kids.length === 0) {
+        const seed = KID_DEFAULTS.map(k => Object.assign({ user_id: uid }, k));
+        const { data: seeded, error: sErr } = await sb.from('ck_kids').insert(seed).select();
+        if (sErr) { alert('Seed error: ' + sErr.message); return; }
+        kids = seeded.sort((a, b) => a.sort - b.sort);
+      }
     }
     state.kids = kids;
+    if (kids.length === 0) { alert('No kids found for this family yet.'); return; }
     if (!state.activeKidId || !kids.find(k => k.id === state.activeKidId)) {
       state.activeKidId = kids[0].id;
     }
