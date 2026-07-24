@@ -78,6 +78,12 @@
   @media (prefers-reduced-motion: reduce) { .week-earned.bump { animation: none; } }
   .week-earned-label { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; text-align: right; }
 
+  .payday-banner { margin: 12px 20px 0; background: #2a1f0a; border: 1px solid var(--accent); border-radius: 10px; padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start; }
+  .payday-icon { font-size: 1.2rem; flex-shrink: 0; }
+  .payday-title { font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 3px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .payday-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+  .payday-desc b { color: var(--text); }
+
   .task-list { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
   .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; gap: 14px; padding: 14px 16px; transition: all 0.15s; cursor: pointer; user-select: none; }
   .task-card.completed { opacity: 0.5; border-color: var(--green); }
@@ -180,6 +186,14 @@
     </div>
   </div>
 
+  <div id="paydayBanner" class="payday-banner hidden">
+    <div class="payday-icon">💰</div>
+    <div>
+      <div class="payday-title">Payday</div>
+      <div class="payday-desc" id="paydayDesc"></div>
+    </div>
+  </div>
+
   <div class="task-list" id="choreList"></div>
 </div>
 
@@ -210,7 +224,7 @@ function localDateStr(d) { return d.toLocaleDateString('en-CA'); }
 function todayStr() { return localDateStr(new Date()); }
 function weekStart() {
   const d = new Date();
-  const day = (d.getDay() + 6) % 7; // Monday = 0
+  const day = (d.getDay() + 1) % 7; // Saturday = 0 (week runs Sat-Fri, payday Friday)
   d.setDate(d.getDate() - day);
   return d;
 }
@@ -409,6 +423,17 @@ function render(bump) {
     earned.classList.remove('bump');
     void earned.offsetWidth;
     earned.classList.add('bump');
+  }
+
+  // payday banner — Fridays only (week is Sat-Fri)
+  const isFriday = new Date().getDay() === 5;
+  const banner = $('paydayBanner');
+  banner.classList.toggle('hidden', !isFriday);
+  if (isFriday && kid) {
+    const total = money(weekTotal(state.activeKidId));
+    $('paydayDesc').innerHTML = state.role === 'kid'
+      ? 'You earned <b>' + total + '</b> this week. Collect tonight — a fresh week starts tomorrow!'
+      : '<b>' + kid.name + '</b> earned <b>' + total + '</b> this week. Pay out tonight — resets tomorrow.';
   }
 
   // task cards
