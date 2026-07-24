@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f0f0f">
+<title>Task Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #222;
+    --border: #2e2e2e;
+    --accent: #c8a96e;
+    --accent2: #8ab4d4;
+    --text: #f0f0f0;
+    --muted: #888;
+    --green: #4a9e6b;
+    --red: #c47a7a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+    overflow-x: hidden;
+  }
+
+  .screen { display: none; min-height: 100vh; flex-direction: column; }
+  .screen.active { display: flex; }
+
+  /* ── AUTH SCREEN ── */
+  .auth-screen { padding: 60px 24px 40px; justify-content: center; }
+  .auth-logo { text-align: center; margin-bottom: 40px; }
+  .auth-logo h1 { font-size: 2rem; font-weight: 800; letter-spacing: 0.08em; color: var(--accent); text-transform: uppercase; }
+  .auth-logo p { font-size: 0.82rem; color: var(--muted); margin-top: 6px; }
+
+  .auth-tabs { display: flex; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .auth-tab { flex: 1; padding: 10px 0; text-align: center; font-size: 0.78rem; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; letter-spacing: 0.06em; text-transform: uppercase; }
+  .auth-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .auth-field { margin-bottom: 14px; }
+  .auth-field label { display: block; font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .auth-field input { width: 100%; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 1rem; }
+  .auth-field input:focus { outline: none; border-color: var(--accent); }
+
+  .auth-error { font-size: 0.72rem; color: var(--red); margin-bottom: 12px; min-height: 18px; }
+
+  .btn-primary { width: 100%; padding: 16px; background: var(--accent); color: #000; font-size: 0.88rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; border: none; border-radius: 10px; cursor: pointer; transition: opacity 0.15s; }
+  .btn-primary:active { opacity: 0.8; }
+
+  .auth-note { margin-top: 16px; font-size: 0.68rem; color: var(--muted); text-align: center; line-height: 1.6; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+
+  /* ── MAIN SCREEN ── */
+  .main-screen { padding-bottom: 40px; }
+
+  .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 100; }
+  .top-bar-title { font-size: 1rem; font-weight: 700; letter-spacing: 0.06em; color: var(--accent); text-transform: uppercase; }
+  .icon-btn { height: 34px; padding: 0 14px; display: flex; align-items: center; justify-content: center; background: var(--surface); border: 1px solid var(--accent); border-radius: 20px; cursor: pointer; font-size: 0.78rem; font-weight: 700; color: var(--accent); transition: all 0.15s; letter-spacing: 0.06em; }
+  .icon-btn:active { background: var(--surface2); }
+
+  .kid-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 57px; z-index: 99; }
+  .kid-tab { flex: 1; padding: 14px 0; text-align: center; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+
+  .week-banner { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .week-label { font-size: 0.62rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px; }
+  .week-kid { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .week-earned { font-size: 1.4rem; font-weight: 800; color: var(--accent); text-align: right; transition: transform 0.15s; }
+  .week-earned.bump { animation: bump 0.3s ease; }
+  @keyframes bump { 50% { transform: scale(1.1); } }
+  @media (prefers-reduced-motion: reduce) { .week-earned.bump { animation: none; } }
+  .week-earned-label { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; text-align: right; }
+
+  .task-list { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; gap: 14px; padding: 14px 16px; transition: all 0.15s; cursor: pointer; user-select: none; }
+  .task-card.completed { opacity: 0.5; border-color: var(--green); }
+  .task-card.completed .task-check { background: var(--green); border-color: var(--green); color: #fff; }
+  .task-check { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: transparent; flex-shrink: 0; transition: all 0.15s; }
+  .task-info { flex: 1; }
+  .task-name { font-size: 1rem; font-weight: 700; color: var(--text); line-height: 1.2; }
+  .task-count { font-size: 0.62rem; color: var(--muted); margin-top: 3px; letter-spacing: 0.04em; }
+  .task-price { font-size: 1.1rem; font-weight: 800; color: var(--accent); flex-shrink: 0; }
+
+  .empty-state { margin: 24px 20px; padding: 28px 16px; text-align: center; font-size: 0.78rem; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; line-height: 1.6; }
+
+  /* ── MANAGE ── */
+  .manage-section { border-bottom: 1px solid var(--border); }
+  .section-header { padding: 16px 20px 10px; font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; }
+  .section-hint { padding: 0 20px 10px; font-size: 0.68rem; color: var(--muted); line-height: 1.5; }
+  .manage-rows { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .manage-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .m-row { display: flex; gap: 8px; }
+  .m-row input { flex: 1; min-width: 0; padding: 11px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.9rem; }
+  .m-row input:focus { outline: none; border-color: var(--accent); }
+  .m-row input.price-in { flex: 0 0 84px; font-weight: 700; }
+  .btn-small { padding: 0 16px; background: var(--accent); color: #000; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border: none; border-radius: 8px; cursor: pointer; flex-shrink: 0; }
+  .btn-small:active { opacity: 0.8; }
+  .btn-danger { padding: 0 12px; background: transparent; color: var(--red); font-size: 0.9rem; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; flex-shrink: 0; }
+  .btn-danger:active { background: var(--surface2); }
+  .signout-wrap { padding: 16px 20px 32px; }
+  .btn-ghost { width: 100%; padding: 14px; background: var(--surface); color: var(--muted); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+  .btn-ghost:active { background: var(--surface2); }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="authView" class="screen auth-screen active">
+  <div class="auth-logo">
+    <h1>Task Tracker</h1>
+    <p>Do the work. Track the money.</p>
+  </div>
+  <div class="auth-tabs">
+    <div class="auth-tab active" id="tabSignIn">Sign In</div>
+    <div class="auth-tab" id="tabSignUp">Sign Up</div>
+  </div>
+  <div class="auth-field">
+    <label>Email</label>
+    <input type="email" id="email" autocomplete="email">
+  </div>
+  <div class="auth-field">
+    <label>Password</label>
+    <input type="password" id="password" autocomplete="current-password">
+  </div>
+  <div class="auth-error" id="authMsg"></div>
+  <button class="btn-primary" id="authBtn">Sign In</button>
+  <div class="auth-note">One account works across all mg42apps — same login as Power Matrix and FitLog.</div>
+</div>
+
+<!-- MAIN -->
+<div id="appView" class="screen main-screen">
+  <div class="top-bar">
+    <div class="top-bar-title">Task Tracker</div>
+    <div class="icon-btn" id="gearBtn">Manage</div>
+  </div>
+
+  <div id="managePanel" class="hidden">
+    <div id="parentTools">
+      <div class="manage-section">
+        <div class="section-header">Kids</div>
+        <div class="section-hint">Add each kid's login email so they can sign in on their own device.</div>
+        <div class="manage-rows" id="kidRows"></div>
+      </div>
+      <div class="manage-section">
+        <div class="section-header">Tasks</div>
+        <div class="manage-rows" id="choreRows"></div>
+        <div class="manage-rows">
+          <div class="m-row">
+            <input type="text" id="newChoreName" placeholder="New task">
+            <input type="number" class="price-in" id="newChorePrice" placeholder="$" step="0.25" min="0" inputmode="decimal">
+            <button class="btn-small" id="addChoreBtn">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="signout-wrap">
+      <button class="btn-ghost" id="signOutBtn">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="kid-tabs" id="kidTabs"></div>
+
+  <div class="week-banner">
+    <div>
+      <div class="week-label" id="weekLabel"></div>
+      <div class="week-kid" id="weekKid"></div>
+    </div>
+    <div>
+      <div class="week-earned" id="weekEarned">$0.00</div>
+      <div class="week-earned-label">Earned this week</div>
+    </div>
+  </div>
+
+  <div class="task-list" id="choreList"></div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://rwtgleklptqixhigbrzy.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3dGdsZWtscHRxaXhoaWdicnp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzMTgwMzYsImV4cCI6MjA5ODg5NDAzNn0.NseddFUTsvltyw4_UhBLPbVrpD51ZL9YcpMIQQd1WSw';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const KID_DEFAULTS = [
+  { name: 'Kid 1', color: '#c8a96e', sort: 0 },
+  { name: 'Kid 2', color: '#8ab4d4', sort: 1 }
+];
+
+let state = {
+  user: null,
+  role: 'parent',   // 'parent' | 'kid'
+  familyId: null,   // parent's auth uid — owner of task/completion rows
+  kids: [],
+  chores: [],
+  completions: [],  // this week's completions
+  activeKidId: null,
+  manageOpen: false
+};
+
+// ---------- date helpers (local time, en-CA to avoid UTC date shift) ----------
+function localDateStr(d) { return d.toLocaleDateString('en-CA'); }
+function todayStr() { return localDateStr(new Date()); }
+function weekStart() {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - day);
+  return d;
+}
+function weekEnd() {
+  const d = weekStart();
+  d.setDate(d.getDate() + 6);
+  return d;
+}
+function weekLabelText() {
+  const s = weekStart();
+  return 'Week of ' + s.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function money(n) { return '$' + Number(n).toFixed(2); }
+
+// ---------- auth ----------
+const $ = (id) => document.getElementById(id);
+let authMode = 'signin';
+
+function setAuthMode(mode) {
+  authMode = mode;
+  $('tabSignIn').classList.toggle('active', mode === 'signin');
+  $('tabSignUp').classList.toggle('active', mode === 'signup');
+  $('authBtn').textContent = mode === 'signin' ? 'Sign In' : 'Sign Up';
+  $('authMsg').textContent = '';
+}
+$('tabSignIn').addEventListener('click', () => setAuthMode('signin'));
+$('tabSignUp').addEventListener('click', () => setAuthMode('signup'));
+
+$('authBtn').addEventListener('click', async () => {
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  $('authMsg').textContent = '';
+  const fn = authMode === 'signin'
+    ? sb.auth.signInWithPassword({ email, password })
+    : sb.auth.signUp({ email, password });
+  const { data, error } = await fn;
+  if (error) { $('authMsg').textContent = error.message; return; }
+  if (authMode === 'signup' && data.user && !data.session) {
+    $('authMsg').textContent = 'Check your email to confirm, then sign in.';
+  }
+});
+
+$('signOutBtn').addEventListener('click', async () => { await sb.auth.signOut(); });
+
+sb.auth.onAuthStateChange((_event, session) => {
+  state.user = session ? session.user : null;
+  if (state.user) {
+    $('authView').classList.remove('active');
+    $('appView').classList.add('active');
+    loadAll();
+  } else {
+    $('appView').classList.remove('active');
+    $('authView').classList.add('active');
+  }
+});
+
+// ---------- data ----------
+async function loadAll() {
+  const uid = state.user.id;
+  const myEmail = (state.user.email || '').toLowerCase();
+
+  // RLS returns: parent → all their kids; kid → only the row whose login_email matches
+  let { data: kids, error: kErr } = await sb.from('ck_kids').select('*').order('sort');
+  if (kErr) { alert('Load error: ' + kErr.message); return; }
+  kids = kids || [];
+
+  const kidRow = kids.find(k =>
+    k.user_id !== uid && (k.login_email || '').toLowerCase() === myEmail);
+
+  if (kidRow) {
+    state.role = 'kid';
+    state.familyId = kidRow.user_id;
+    state.kids = [kidRow];
+    state.activeKidId = kidRow.id;
+  } else {
+    state.role = 'parent';
+    state.familyId = uid;
+    kids = kids.filter(k => k.user_id === uid);
+    if (kids.length === 0) {
+      const seed = KID_DEFAULTS.map(k => Object.assign({ user_id: uid }, k));
+      const { data: seeded, error: sErr } = await sb.from('ck_kids').insert(seed).select();
+      if (sErr) { alert('Seed error: ' + sErr.message); return; }
+      kids = seeded.sort((a, b) => a.sort - b.sort);
+    }
+    state.kids = kids;
+    if (!state.activeKidId || !kids.find(k => k.id === state.activeKidId)) {
+      state.activeKidId = kids[0].id;
+    }
+  }
+
+  const { data: chores, error: cErr } = await sb.from('ck_chores')
+    .select('*').eq('user_id', state.familyId).order('sort').order('created_at');
+  if (cErr) { alert('Load error: ' + cErr.message); return; }
+  state.chores = chores || [];
+
+  await loadWeek();
+  render();
+}
+
+async function loadWeek() {
+  const { data, error } = await sb.from('ck_completions')
+    .select('*')
+    .eq('user_id', state.familyId)
+    .gte('done_date', localDateStr(weekStart()))
+    .lte('done_date', localDateStr(weekEnd()));
+  if (error) { alert('Load error: ' + error.message); return; }
+  state.completions = data || [];
+}
+
+function isDoneToday(kidId, choreId) {
+  const t = todayStr();
+  return state.completions.some(c => c.kid_id === kidId && c.chore_id === choreId && c.done_date === t);
+}
+function weekCount(kidId, choreId) {
+  return state.completions.filter(c => c.kid_id === kidId && c.chore_id === choreId).length;
+}
+function weekTotal(kidId) {
+  let sum = 0;
+  for (const c of state.completions) {
+    if (c.kid_id !== kidId) continue;
+    const chore = state.chores.find(ch => ch.id === c.chore_id);
+    if (chore) sum += Number(chore.price);
+  }
+  return sum;
+}
+
+async function toggleChore(choreId) {
+  const kidId = state.activeKidId;
+  const t = todayStr();
+  const existing = state.completions.find(c =>
+    c.kid_id === kidId && c.chore_id === choreId && c.done_date === t);
+
+  if (existing) {
+    state.completions = state.completions.filter(c => c.id !== existing.id);
+    render();
+    const { error } = await sb.from('ck_completions').delete().eq('id', existing.id);
+    if (error) { alert('Save error: ' + error.message); await loadWeek(); render(); }
+  } else {
+    const temp = { id: 'temp-' + Date.now(), user_id: state.familyId, kid_id: kidId, chore_id: choreId, done_date: t };
+    state.completions.push(temp);
+    render(true);
+    const { data, error } = await sb.from('ck_completions')
+      .insert({ user_id: state.familyId, kid_id: kidId, chore_id: choreId, done_date: t })
+      .select().single();
+    if (error) { alert('Save error: ' + error.message); await loadWeek(); render(); return; }
+    const i = state.completions.findIndex(c => c.id === temp.id);
+    if (i >= 0) state.completions[i] = data;
+  }
+}
+
+// ---------- render ----------
+function activeKid() { return state.kids.find(k => k.id === state.activeKidId); }
+
+function render(bump) {
+  // kid tabs (kid login: single locked tab)
+  const tabs = $('kidTabs');
+  tabs.innerHTML = '';
+  for (const k of state.kids) {
+    const t = document.createElement('div');
+    t.className = 'kid-tab';
+    t.textContent = k.name;
+    if (k.id === state.activeKidId) {
+      t.style.color = k.color;
+      t.style.borderBottomColor = k.color;
+    }
+    if (state.role === 'parent') {
+      t.addEventListener('click', () => { state.activeKidId = k.id; render(); });
+    }
+    tabs.appendChild(t);
+  }
+
+  $('parentTools').classList.toggle('hidden', state.role !== 'parent');
+
+  // week banner
+  const kid = activeKid();
+  $('weekLabel').textContent = weekLabelText();
+  $('weekKid').textContent = kid ? kid.name : '';
+  const earned = $('weekEarned');
+  earned.textContent = money(weekTotal(state.activeKidId));
+  if (kid) earned.style.color = kid.color;
+  if (bump) {
+    earned.classList.remove('bump');
+    void earned.offsetWidth;
+    earned.classList.add('bump');
+  }
+
+  // task cards
+  const list = $('choreList');
+  list.innerHTML = '';
+  if (state.chores.length === 0) {
+    const e = document.createElement('div');
+    e.className = 'empty-state';
+    e.textContent = state.role === 'parent'
+      ? 'No tasks yet. Tap Manage to add tasks and prices.'
+      : 'No tasks yet. Ask a parent to add some.';
+    list.appendChild(e);
+  }
+  for (const ch of state.chores) {
+    const done = isDoneToday(state.activeKidId, ch.id);
+    const count = weekCount(state.activeKidId, ch.id);
+    const card = document.createElement('div');
+    card.className = 'task-card' + (done ? ' completed' : '');
+    card.innerHTML =
+      '<div class="task-check">✓</div>' +
+      '<div class="task-info"><div class="task-name"></div><div class="task-count"></div></div>' +
+      '<div class="task-price"></div>';
+    card.querySelector('.task-name').textContent = ch.name;
+    card.querySelector('.task-count').textContent =
+      count > 0 ? ('Done ' + count + '× this week') : 'Not done this week';
+    card.querySelector('.task-price').textContent = money(ch.price);
+    card.addEventListener('click', () => toggleChore(ch.id));
+    list.appendChild(card);
+  }
+
+  renderManage();
+}
+
+// ---------- manage ----------
+$('gearBtn').addEventListener('click', () => {
+  state.manageOpen = !state.manageOpen;
+  $('managePanel').classList.toggle('hidden', !state.manageOpen);
+  $('gearBtn').textContent = state.manageOpen ? 'Close' : 'Manage';
+  renderManage();
+});
+
+function renderManage() {
+  if (!state.manageOpen || state.role !== 'parent') return;
+
+  const kidRows = $('kidRows');
+  kidRows.innerHTML = '';
+  for (const k of state.kids) {
+    const item = document.createElement('div');
+    item.className = 'manage-item';
+
+    const row1 = document.createElement('div');
+    row1.className = 'm-row';
+    const nameIn = document.createElement('input');
+    nameIn.type = 'text'; nameIn.value = k.name;
+    const save = document.createElement('button');
+    save.className = 'btn-small'; save.textContent = 'Save';
+    row1.appendChild(nameIn); row1.appendChild(save);
+
+    const row2 = document.createElement('div');
+    row2.className = 'm-row';
+    const emailIn = document.createElement('input');
+    emailIn.type = 'email'; emailIn.value = k.login_email || '';
+    emailIn.placeholder = k.name + "'s login email";
+    row2.appendChild(emailIn);
+
+    save.addEventListener('click', async () => {
+      const name = nameIn.value.trim();
+      const login_email = emailIn.value.trim() || null;
+      if (!name) return;
+      const { error } = await sb.from('ck_kids').update({ name, login_email }).eq('id', k.id);
+      if (error) { alert('Save error: ' + error.message); return; }
+      k.name = name; k.login_email = login_email; render();
+    });
+
+    item.appendChild(row1); item.appendChild(row2);
+    kidRows.appendChild(item);
+  }
+
+  const choreRows = $('choreRows');
+  choreRows.innerHTML = '';
+  for (const ch of state.chores) {
+    const item = document.createElement('div');
+    item.className = 'manage-item';
+    const row = document.createElement('div');
+    row.className = 'm-row';
+    const nameIn = document.createElement('input');
+    nameIn.type = 'text'; nameIn.value = ch.name;
+    const priceIn = document.createElement('input');
+    priceIn.type = 'number'; priceIn.className = 'price-in'; priceIn.step = '0.25'; priceIn.min = '0';
+    priceIn.value = Number(ch.price).toFixed(2);
+    const save = document.createElement('button');
+    save.className = 'btn-small'; save.textContent = 'Save';
+    save.addEventListener('click', async () => {
+      const n = nameIn.value.trim();
+      const p = parseFloat(priceIn.value);
+      if (!n || isNaN(p) || p < 0) return;
+      const { error } = await sb.from('ck_chores').update({ name: n, price: p }).eq('id', ch.id);
+      if (error) { alert('Save error: ' + error.message); return; }
+      ch.name = n; ch.price = p; render();
+    });
+    const del = document.createElement('button');
+    del.className = 'btn-danger'; del.textContent = '✕';
+    del.addEventListener('click', async () => {
+      if (!confirm('Delete "' + ch.name + '"? This removes its history too.')) return;
+      const { error } = await sb.from('ck_chores').delete().eq('id', ch.id);
+      if (error) { alert('Delete error: ' + error.message); return; }
+      state.chores = state.chores.filter(c => c.id !== ch.id);
+      await loadWeek();
+      render();
+    });
+    row.appendChild(nameIn); row.appendChild(priceIn); row.appendChild(save); row.appendChild(del);
+    item.appendChild(row);
+    choreRows.appendChild(item);
+  }
+}
+
+$('addChoreBtn').addEventListener('click', async () => {
+  const name = $('newChoreName').value.trim();
+  const price = parseFloat($('newChorePrice').value);
+  if (!name || isNaN(price) || price < 0) return;
+  const sort = state.chores.length;
+  const { data, error } = await sb.from('ck_chores')
+    .insert({ user_id: state.familyId, name, price, sort })
+    .select().single();
+  if (error) { alert('Add error: ' + error.message); return; }
+  state.chores.push(data);
+  $('newChoreName').value = ''; $('newChorePrice').value = '';
+  render();
+});
+</script>
+</body>
+</html>
