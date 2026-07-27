@@ -86,6 +86,15 @@
   @media (prefers-reduced-motion: reduce) { .week-earned.bump { animation: none; } }
   .week-earned-label { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; text-align: right; }
 
+  .day-strip { display: flex; gap: 6px; padding: 14px 20px 0; }
+  .day-chip { flex: 1; text-align: center; padding: 7px 0 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; user-select: none; }
+  .day-chip .dow { display: block; font-size: 0.52rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 1px; }
+  .day-chip .dom { font-size: 0.82rem; font-weight: 700; color: var(--text); }
+  .day-chip.selected { border-color: var(--accent); background: #2a1f0a; }
+  .day-chip.selected .dow, .day-chip.selected .dom { color: var(--accent); }
+  .day-chip.future { opacity: 0.3; cursor: default; }
+  .log-notice { margin: 10px 20px 0; padding: 9px 12px; background: #2a1f0a; border: 1px solid var(--accent); border-radius: 8px; font-size: 0.72rem; color: var(--accent); font-weight: 600; text-align: center; letter-spacing: 0.03em; }
+
   .payday-banner { margin: 12px 20px 0; background: #2a1f0a; border: 1px solid var(--accent); border-radius: 10px; padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start; }
   .payday-icon { font-size: 1.2rem; flex-shrink: 0; }
   .payday-title { font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 3px; letter-spacing: 0.04em; text-transform: uppercase; }
@@ -197,6 +206,9 @@
 
   <div class="history hidden" id="historyPanel"></div>
 
+  <div class="day-strip" id="dayStrip"></div>
+  <div class="log-notice hidden" id="logNotice"></div>
+
   <div id="paydayBanner" class="payday-banner hidden">
     <div class="payday-icon">💰</div>
     <div>
@@ -228,7 +240,8 @@ let state = {
   completions: [],  // this week's completions
   activeKidId: null,
   manageOpen: false,
-  historyOpen: false
+  historyOpen: false,
+  logDate: null   // which day taps apply to (defaults to today, current week only)
 };
 
 // ---------- date helpers (local time, en-CA to avoid UTC date shift) ----------
@@ -248,6 +261,16 @@ function weekEnd() {
 function weekLabelText() {
   const s = weekStart();
   return 'Week of ' + s.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function weekDates() {
+  const s = weekStart();
+  const arr = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(s);
+    d.setDate(s.getDate() + i);
+    arr.push(localDateStr(d));
+  }
+  return arr;
 }
 function money(n) { return '$' + Number(n).toFixed(2); }
 
@@ -297,6 +320,11 @@ sb.auth.onAuthStateChange((_event, session) => {
 async function loadAll() {
   const uid = state.user.id;
   const myEmail = (state.user.email || '').toLowerCase();
+
+  // keep logDate sane: default today; snap back if stale (new day/new week)
+  if (!state.logDate || state.logDate > todayStr() || state.logDate < localDateStr(weekStart())) {
+    state.logDate = todayStr();
+  }
 
   // RLS returns: parent → all their kids; kid → only the row whose login_email matches
   let { data: kids, error: kErr } = await sb.from('ck_kids').select('*').order('sort');
@@ -360,9 +388,8 @@ async function loadWeek() {
   state.completions = data || [];
 }
 
-function isDoneToday(kidId, choreId) {
-  const t = todayStr();
-  return state.completions.some(c => c.kid_id === kidId && c.chore_id === choreId && c.done_date === t);
+function isDoneOn(kidId, choreId, date) {
+  return state.completions.some(c => c.kid_id === kidId && c.chore_id === choreId && c.done_date === date);
 }
 function weekCount(kidId, choreId) {
   return state.completions.filter(c => c.kid_id === kidId && c.chore_id === choreId).length;
@@ -379,7 +406,7 @@ function weekTotal(kidId) {
 
 async function toggleChore(choreId) {
   const kidId = state.activeKidId;
-  const t = todayStr();
+  const t = state.logDate || todayStr();
   const existing = state.completions.find(c =>
     c.kid_id === kidId && c.chore_id === choreId && c.done_date === t);
 
@@ -514,6 +541,32 @@ function render(bump) {
       : '<b>' + kid.name + '</b> earned <b>' + total + '</b> this week. Pay out tonight — resets tomorrow.';
   }
 
+  // day strip: Sat -> Fri chips, future days disabled
+  const strip = $('dayStrip');
+  strip.innerHTML = '';
+  const today = todayStr();
+  for (const ds of weekDates()) {
+    const chip = document.createElement('div');
+    const isFuture = ds > today;
+    chip.className = 'day-chip' + (ds === state.logDate ? ' selected' : '') + (isFuture ? ' future' : '');
+    const d = new Date(ds + 'T12:00:00');
+    chip.innerHTML = '<span class="dow"></span><span class="dom"></span>';
+    chip.children[0].textContent = d.toLocaleDateString('en-US', { weekday: 'short' });
+    chip.children[1].textContent = d.getDate();
+    if (!isFuture) chip.addEventListener('click', () => { state.logDate = ds; render(); });
+    strip.appendChild(chip);
+  }
+
+  // notice when logging a past day
+  const notice = $('logNotice');
+  if (state.logDate !== today) {
+    const nd = new Date(state.logDate + 'T12:00:00');
+    notice.textContent = 'Logging for ' + nd.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) + ' — taps apply to that day';
+    notice.classList.remove('hidden');
+  } else {
+    notice.classList.add('hidden');
+  }
+
   // task cards
   const list = $('choreList');
   list.innerHTML = '';
@@ -526,7 +579,7 @@ function render(bump) {
     list.appendChild(e);
   }
   for (const ch of state.chores) {
-    const done = isDoneToday(state.activeKidId, ch.id);
+    const done = isDoneOn(state.activeKidId, ch.id, state.logDate || today);
     const count = weekCount(state.activeKidId, ch.id);
     const card = document.createElement('div');
     card.className = 'task-card' + (done ? ' completed' : '');
