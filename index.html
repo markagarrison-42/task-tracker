@@ -69,7 +69,15 @@
   .kid-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 57px; z-index: 99; }
   .kid-tab { flex: 1; padding: 14px 0; text-align: center; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
 
-  .week-banner { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .week-banner { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+  .week-hint { font-size: 0.58rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+
+  .history { border-bottom: 1px solid var(--border); background: var(--surface); padding: 4px 20px 14px; }
+  .history-day { margin-top: 10px; }
+  .history-date { display: flex; justify-content: space-between; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 5px; }
+  .history-item { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text); padding: 3px 0 3px 10px; border-left: 2px solid var(--border); }
+  .history-item .p { color: var(--muted); }
+  .history-empty { font-size: 0.75rem; color: var(--muted); margin-top: 10px; }
   .week-label { font-size: 0.62rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px; }
   .week-kid { font-size: 1rem; font-weight: 700; color: var(--text); }
   .week-earned { font-size: 1.4rem; font-weight: 800; color: var(--accent); text-align: right; transition: transform 0.15s; }
@@ -175,16 +183,19 @@
 
   <div class="kid-tabs" id="kidTabs"></div>
 
-  <div class="week-banner">
+  <div class="week-banner" id="weekBanner">
     <div>
       <div class="week-label" id="weekLabel"></div>
       <div class="week-kid" id="weekKid"></div>
+      <div class="week-hint" id="weekHint">Tap for daily breakdown</div>
     </div>
     <div>
       <div class="week-earned" id="weekEarned">$0.00</div>
       <div class="week-earned-label">Earned this week</div>
     </div>
   </div>
+
+  <div class="history hidden" id="historyPanel"></div>
 
   <div id="paydayBanner" class="payday-banner hidden">
     <div class="payday-icon">💰</div>
@@ -216,7 +227,8 @@ let state = {
   chores: [],
   completions: [],  // this week's completions
   activeKidId: null,
-  manageOpen: false
+  manageOpen: false,
+  historyOpen: false
 };
 
 // ---------- date helpers (local time, en-CA to avoid UTC date shift) ----------
@@ -392,6 +404,72 @@ async function toggleChore(choreId) {
 // ---------- render ----------
 function activeKid() { return state.kids.find(k => k.id === state.activeKidId); }
 
+$('weekBanner').addEventListener('click', () => {
+  state.historyOpen = !state.historyOpen;
+  renderHistory();
+});
+
+function renderHistory() {
+  const panel = $('historyPanel');
+  panel.classList.toggle('hidden', !state.historyOpen);
+  $('weekHint').textContent = state.historyOpen ? 'Tap to hide breakdown' : 'Tap for daily breakdown';
+  if (!state.historyOpen) return;
+
+  panel.innerHTML = '';
+  const mine = state.completions.filter(c => c.kid_id === state.activeKidId);
+  if (mine.length === 0) {
+    const e = document.createElement('div');
+    e.className = 'history-empty';
+    e.textContent = 'Nothing logged yet this week.';
+    panel.appendChild(e);
+    return;
+  }
+
+  const byDate = {};
+  for (const c of mine) {
+    if (!byDate[c.done_date]) byDate[c.done_date] = [];
+    byDate[c.done_date].push(c);
+  }
+  const dates = Object.keys(byDate).sort().reverse(); // newest first
+
+  for (const date of dates) {
+    const day = document.createElement('div');
+    day.className = 'history-day';
+
+    const d = new Date(date + 'T12:00:00'); // noon avoids TZ edge cases
+    const label = (date === todayStr())
+      ? 'Today'
+      : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    let dayTotal = 0;
+    const items = [];
+    for (const c of byDate[date]) {
+      const chore = state.chores.find(ch => ch.id === c.chore_id);
+      const name = chore ? chore.name : '(deleted task)';
+      const price = chore ? Number(chore.price) : 0;
+      dayTotal += price;
+      items.push({ name, price });
+    }
+
+    const head = document.createElement('div');
+    head.className = 'history-date';
+    head.innerHTML = '<span></span><span></span>';
+    head.children[0].textContent = label;
+    head.children[1].textContent = money(dayTotal);
+    day.appendChild(head);
+
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'history-item';
+      row.innerHTML = '<span></span><span class="p"></span>';
+      row.children[0].textContent = it.name;
+      row.children[1].textContent = money(it.price);
+      day.appendChild(row);
+    }
+    panel.appendChild(day);
+  }
+}
+
 function render(bump) {
   // kid tabs (kid login: single locked tab)
   const tabs = $('kidTabs');
@@ -465,6 +543,7 @@ function render(bump) {
   }
 
   renderManage();
+  renderHistory();
 }
 
 // ---------- manage ----------
