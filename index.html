@@ -100,6 +100,10 @@
   .payday-title { font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 3px; letter-spacing: 0.04em; text-transform: uppercase; }
   .payday-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
   .payday-desc b { color: var(--text); }
+  .banner-btn { margin-top: 10px; padding: 9px 16px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-weight: 700; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+  .banner-btn:active { opacity: 0.8; }
+  .banner-undo { margin-top: 10px; margin-left: 12px; background: none; border: none; color: var(--muted); font-size: 0.68rem; text-decoration: underline; cursor: pointer; }
+  .paid-tag { color: var(--green); font-weight: 700; }
 
   .task-list { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
   .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; gap: 14px; padding: 14px 16px; transition: all 0.15s; cursor: pointer; user-select: none; }
@@ -209,13 +213,7 @@
   <div class="day-strip" id="dayStrip"></div>
   <div class="log-notice hidden" id="logNotice"></div>
 
-  <div id="paydayBanner" class="payday-banner hidden">
-    <div class="payday-icon">💰</div>
-    <div>
-      <div class="payday-title">Payday</div>
-      <div class="payday-desc" id="paydayDesc"></div>
-    </div>
-  </div>
+  <div id="payoutArea"></div>
 
   <div class="task-list" id="choreList"></div>
 </div>
@@ -237,7 +235,9 @@ let state = {
   familyId: null,   // parent's auth uid — owner of task/completion rows
   kids: [],
   chores: [],
-  completions: [],  // this week's completions
+  completions: [],          // this week's completions
+  lastWeekCompletions: [],  // last week's (for late payout)
+  payouts: [],
   activeKidId: null,
   manageOpen: false,
   historyOpen: false,
@@ -378,14 +378,28 @@ async function loadAll() {
   render();
 }
 
+function lastWeekStartDate() {
+  const d = weekStart();
+  d.setDate(d.getDate() - 7);
+  return d;
+}
+
 async function loadWeek() {
   const { data, error } = await sb.from('ck_completions')
     .select('*')
     .eq('user_id', state.familyId)
-    .gte('done_date', localDateStr(weekStart()))
+    .gte('done_date', localDateStr(lastWeekStartDate()))
     .lte('done_date', localDateStr(weekEnd()));
   if (error) { alert('Load error: ' + error.message); return; }
-  state.completions = data || [];
+  const ws = localDateStr(weekStart());
+  const all = data || [];
+  state.completions = all.filter(c => c.done_date >= ws);
+  state.lastWeekCompletions = all.filter(c => c.done_date < ws);
+
+  const { data: pays, error: pErr } = await sb.from('ck_payouts')
+    .select('*').eq('user_id', state.familyId);
+  if (pErr) { alert('Load error: ' + pErr.message); return; }
+  state.payouts = pays || [];
 }
 
 function isDoneOn(kidId, choreId, date) {
@@ -394,14 +408,46 @@ function isDoneOn(kidId, choreId, date) {
 function weekCount(kidId, choreId) {
   return state.completions.filter(c => c.kid_id === kidId && c.chore_id === choreId).length;
 }
-function weekTotal(kidId) {
+function totalFrom(arr, kidId) {
   let sum = 0;
-  for (const c of state.completions) {
+  for (const c of arr) {
     if (c.kid_id !== kidId) continue;
     const chore = state.chores.find(ch => ch.id === c.chore_id);
     if (chore) sum += Number(chore.price);
   }
   return sum;
+}
+function weekTotal(kidId) { return totalFrom(state.completions, kidId); }
+function lastWeekTotal(kidId) { return totalFrom(state.lastWeekCompletions, kidId); }
+function payoutFor(kidId, weekStartStr) {
+  return state.payouts.find(p => p.kid_id === kidId && p.week_start === weekStartStr);
+}
+function fmtWeek(ws) {
+  return new Date(ws + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+async function markPaid(kidId, weekStartStr, amount) {
+  const { data, error } = await sb.from('ck_payouts')
+    .insert({ user_id: state.familyId, kid_id: kidId, week_start: weekStartStr, amount })
+    .select().single();
+  if (error) { alert('Save error: ' + error.message); return; }
+  state.payouts.push(data);
+  render();
+}
+async function undoPaid(payoutId) {
+  const { error } = await sb.from('ck_payouts').delete().eq('id', payoutId);
+  if (error) { alert('Undo error: ' + error.message); return; }
+  state.payouts = state.payouts.filter(p => p.id !== payoutId);
+  render();
+}
+async function ackPayout(payoutId) {
+  const ts = new Date().toISOString();
+  const { error } = await sb.from('ck_payouts')
+    .update({ acknowledged_at: ts }).eq('id', payoutId);
+  if (error) { alert('Error: ' + error.message); return; }
+  const p = state.payouts.find(x => x.id === payoutId);
+  if (p) p.acknowledged_at = ts;
+  render();
 }
 
 async function toggleChore(choreId) {
@@ -497,6 +543,89 @@ function renderHistory() {
   }
 }
 
+function mkBanner(icon, title, descHTML) {
+  const b = document.createElement('div');
+  b.className = 'payday-banner';
+  b.innerHTML = '<div class="payday-icon"></div><div class="payday-body"><div class="payday-title"></div><div class="payday-desc"></div></div>';
+  b.querySelector('.payday-icon').textContent = icon;
+  b.querySelector('.payday-title').textContent = title;
+  b.querySelector('.payday-desc').innerHTML = descHTML;
+  return b;
+}
+
+function renderBanners() {
+  const area = $('payoutArea');
+  area.innerHTML = '';
+  const kid = activeKid();
+  if (!kid) return;
+
+  const isFriday = new Date().getDay() === 5;
+  const thisWS = localDateStr(weekStart());
+  const lastWS = localDateStr(lastWeekStartDate());
+
+  if (state.role === 'kid') {
+    // paid notifications — show until the kid taps Got it
+    for (const p of state.payouts.filter(x => x.kid_id === kid.id && !x.acknowledged_at)) {
+      const b = mkBanner('🎉', 'You got paid!',
+        'You received <b>' + money(p.amount) + '</b> for the week of ' + fmtWeek(p.week_start) + '. Nice work!');
+      const btn = document.createElement('button');
+      btn.className = 'banner-btn';
+      btn.textContent = 'Got it';
+      btn.addEventListener('click', () => ackPayout(p.id));
+      b.querySelector('.payday-body').appendChild(btn);
+      area.appendChild(b);
+    }
+    // Friday payday
+    if (isFriday) {
+      const p = payoutFor(kid.id, thisWS);
+      const desc = p
+        ? '<span class="paid-tag">Paid ' + money(p.amount) + ' ✓</span>'
+        : 'You earned <b>' + money(weekTotal(kid.id)) + '</b> this week. Collect tonight — a fresh week starts tomorrow!';
+      area.appendChild(mkBanner('💰', 'Payday', desc));
+    }
+    return;
+  }
+
+  // parent/admin
+  if (isFriday) {
+    const p = payoutFor(kid.id, thisWS);
+    if (p) {
+      const b = mkBanner('💰', 'Payday',
+        '<b>' + kid.name + '</b> — <span class="paid-tag">paid ' + money(p.amount) + ' ✓</span>');
+      const undo = document.createElement('button');
+      undo.className = 'banner-undo';
+      undo.textContent = 'Undo';
+      undo.addEventListener('click', () => undoPaid(p.id));
+      b.querySelector('.payday-body').appendChild(undo);
+      area.appendChild(b);
+    } else {
+      const amt = weekTotal(kid.id);
+      const b = mkBanner('💰', 'Payday',
+        '<b>' + kid.name + '</b> earned <b>' + money(amt) + '</b> this week.');
+      const btn = document.createElement('button');
+      btn.className = 'banner-btn';
+      btn.textContent = 'Mark Paid ' + money(amt);
+      btn.addEventListener('click', () => markPaid(kid.id, thisWS, amt));
+      b.querySelector('.payday-body').appendChild(btn);
+      area.appendChild(b);
+    }
+  }
+
+  // last week unpaid chaser (any day)
+  const lastAmt = lastWeekTotal(kid.id);
+  const pLast = payoutFor(kid.id, lastWS);
+  if (lastAmt > 0 && !pLast) {
+    const b = mkBanner('⏰', 'Last week unpaid',
+      '<b>' + kid.name + '</b> earned <b>' + money(lastAmt) + '</b> the week of ' + fmtWeek(lastWS) + '.');
+    const btn = document.createElement('button');
+    btn.className = 'banner-btn';
+    btn.textContent = 'Mark Paid ' + money(lastAmt);
+    btn.addEventListener('click', () => markPaid(kid.id, lastWS, lastAmt));
+    b.querySelector('.payday-body').appendChild(btn);
+    area.appendChild(b);
+  }
+}
+
 function render(bump) {
   // kid tabs (kid login: single locked tab)
   const tabs = $('kidTabs');
@@ -530,16 +659,8 @@ function render(bump) {
     earned.classList.add('bump');
   }
 
-  // payday banner — Fridays only (week is Sat-Fri)
-  const isFriday = new Date().getDay() === 5;
-  const banner = $('paydayBanner');
-  banner.classList.toggle('hidden', !isFriday);
-  if (isFriday && kid) {
-    const total = money(weekTotal(state.activeKidId));
-    $('paydayDesc').innerHTML = state.role === 'kid'
-      ? 'You earned <b>' + total + '</b> this week. Collect tonight — a fresh week starts tomorrow!'
-      : '<b>' + kid.name + '</b> earned <b>' + total + '</b> this week. Pay out tonight — resets tomorrow.';
-  }
+  // payout + payday banners
+  renderBanners();
 
   // day strip: Sat -> Fri chips, future days disabled
   const strip = $('dayStrip');
